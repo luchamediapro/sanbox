@@ -1,73 +1,72 @@
-import express from 'express';
-const app = express();
-const PORT = process.env.PORT || 10000;
+// Cloudflare Worker - Guarda como worker.js y despliega en Cloudflare Workers
+// Soporta m3u8 y ts con User-Agent personalizado
 
-app.get('/', (req, res) => {
-  res.set('Access-Control-Allow-Origin', '*');
-  res.send(`
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="referrer" content="no-referrer">
-<style>body{margin:0;background:#000;overflow:hidden} #player{width:100vw;height:100vh}</style>
-<script>
-// 1. Mata popups antes de que carguen
-window.open = function(){ return null; };
-Window.prototype.open = function(){ return null; };
-// 2. Mata los scripts de publicidad antes de que se creen
-const _create = Document.prototype.createElement;
-Document.prototype.createElement = function(tag){
-  const el = _create.call(this, tag);
-  if(tag.toLowerCase() === 'script'){
-    const _set = el.setAttribute.bind(el);
-    el.setAttribute = function(k,v){
-      if(k==='src' && (v.includes('arisefeistyleery') || v.includes('llvpn') || v.includes('histats') || v.includes('cloudflareinsights'))){
-        console.log('Popup bloqueado:', v);
-        return;
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const targetUrl = url.searchParams.get('url');
+    const userAgent = url.searchParams.get('ua') || 'Ha3ia3USGXTgFNnuUUQzGT0MWjqaR7jA1DiQP46crrTm5e34HZF2Ayu3MjVWwMWg0hbkTTbmz7PTJSrBKWva1TybW2WQSqAKgyg2PccShf5DAhBm4d3VBU1C0TLJMAipi4LDdESmi0Q2wpRzYUg';
+
+    if (!targetUrl) {
+      return new Response('Falta ?url=', { status: 400 });
+    }
+
+    // CORS preflight
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, OPTIONS',
+          'Access-Control-Allow-Headers': '*',
+        }
+      });
+    }
+
+    try {
+      const upstream = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': userAgent,
+          'Referer': 'http://nffthex0kzt.xyz/',
+          'Origin': 'http://nffthex0kzt.xyz',
+        }
+      });
+
+      let contentType = upstream.headers.get('Content-Type') || '';
+      let body = await upstream.text();
+
+      // Si es m3u8, reescribir URLs de los .ts para que también pasen por el proxy
+      if (targetUrl.includes('.m3u8') || body.includes('#EXTM3U')) {
+        const base = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+        const proxyBase = url.origin + url.pathname;
+        
+        body = body.split('\n').map(line => {
+          line = line.trim();
+          if (!line || line.startsWith('#')) return line;
+          // es una url de segmento
+          let full = line;
+          if (line.startsWith('/')) {
+             // /nk7t4f7d8w7r68h0kt/417_3044.ts -> http://nffthex0kzt.xyz/...
+             full = 'http://nffthex0kzt.xyz' + line;
+          } else if (!line.startsWith('http')) {
+             full = base + line;
+          }
+          return `${proxyBase}?url=${encodeURIComponent(full)}&ua=${encodeURIComponent(userAgent)}`;
+        }).join('\n');
+        
+        contentType = 'application/vnd.apple.mpegurl';
       }
-      _set(k,v);
+
+      return new Response(body, {
+        status: upstream.status,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Content-Type': contentType,
+          'Cache-Control': 'no-cache',
+        }
+      });
+
+    } catch (e) {
+      return new Response('Error proxy: ' + e.message, { status: 500 });
     }
   }
-  return el;
 }
-</script>
-</head>
-<body>
-<div id="cont">Cargando La 1...</div>
-<script>
-(async()=>{
-  const target = "https://capo8play.com/capo.php?player=desktop&live=mltv";
-  // Usamos un cors proxy que no esta bloqueado, solo para traer el html
-  const proxy = "https://api.allorigins.win/raw?url=" + encodeURIComponent(target);
-  try{
-    let html = await fetch(proxy).then(r=>r.text());
-    // Limpieza final
-    html = html.replace(/<script src="https:\\/\\/arisefeistyleery\\.com[^>]*><\\/script>/gi,"")
-               .replace(/llvpn\\.com\\/tag\\.min\\.js/gi,"")
-               .replace(/!function\\(\\)\\{try\\{var t=\\["sandbox".*?e\\(\\)\\}catch\\(n\\)\\{\\}\\}\\(\);/gs,"");
-    
-    document.getElementById('cont').innerHTML = html;
-    
-    // Re-ejecutar los scripts del player (bitmovin)
-    const scripts = document.getElementById('cont').querySelectorAll('script');
-    scripts.forEach(old=>{
-      if(old.src && old.src.includes('bitmovin')) return;
-      if(!old.src){
-        const s = document.createElement('script');
-        s.textContent = old.textContent;
-        document.body.appendChild(s);
-      }
-    });
-  }catch(e){
-    document.getElementById('cont').innerHTML = "Error cargando: " + e + "<br>Abriendo directo...<iframe src='"+target+"' style='width:100vw;height:100vh;border:0' allowfullscreen></iframe>";
-  }
-})();
-</script>
-</body>
-</html>
-  `);
-});
-
-app.listen(PORT, ()=>console.log("Listo en "+PORT));
