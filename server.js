@@ -38,7 +38,7 @@ Document.prototype.createElement = function(tag){
 <div id="cont">Cargando La 1...</div>
 <script>
 (async()=>{
-  const target = "https://sudamericaplay.sbs/canal_8112/tvla1es.html";
+  const target = "https://capo8play.com/capo.php?player=desktop&live=mltv";
   // Usamos un cors proxy que no esta bloqueado, solo para traer el html
   const proxy = "https://api.allorigins.win/raw?url=" + encodeURIComponent(target);
   try{
