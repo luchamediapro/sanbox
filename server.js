@@ -1,72 +1,70 @@
-// Cloudflare Worker - Guarda como worker.js y despliega en Cloudflare Workers
-// Soporta m3u8 y ts con User-Agent personalizado
+import express from 'express';
+import cors from 'cors';
+import fetch from 'node-fetch';
 
-export default {
-  async fetch(request) {
-    const url = new URL(request.url);
-    const targetUrl = url.searchParams.get('url');
-    const userAgent = url.searchParams.get('ua') || 'Ha3ia3USGXTgFNnuUUQzGT0MWjqaR7jA1DiQP46crrTm5e34HZF2Ayu3MjVWwMWg0hbkTTbmz7PTJSrBKWva1TybW2WQSqAKgyg2PccShf5DAhBm4d3VBU1C0TLJMAipi4LDdESmi0Q2wpRzYUg';
+const app = express();
+const PORT = process.env.PORT || 10000;
 
-    if (!targetUrl) {
-      return new Response('Falta ?url=', { status: 400 });
-    }
+const DEFAULT_UA = 'Ha3ia3USGXTgFNnuUUQzGT0MWjqaR7jA1DiQP46crrTm5e34HZF2Ayu3MjVWwMWg0hbkTTbmz7PTJSrBKWva1TybW2WQSqAKgyg2PccShf5DAhBm4d3VBU1C0TLJMAipi4LDdESmi0Q2wpRzYUg';
 
-    // CORS preflight
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, OPTIONS',
-          'Access-Control-Allow-Headers': '*',
-        }
-      });
-    }
+app.use(cors({ origin: '*' }));
+app.use(express.static('public'));
 
-    try {
-      const upstream = await fetch(targetUrl, {
-        headers: {
-          'User-Agent': userAgent,
-          'Referer': 'http://nffthex0kzt.xyz/',
-          'Origin': 'http://nffthex0kzt.xyz',
-        }
-      });
+app.get('/', (req, res) => {
+  res.send(`<h2>Proxy OK</h2><pre>/proxy?url=http://nffthex0kzt.xyz/rk/KYueQkWJhwrHVH/9Xu5JzN88Y/417.m3u8&ua=${DEFAULT_UA}</pre>`);
+});
 
-      let contentType = upstream.headers.get('Content-Type') || '';
-      let body = await upstream.text();
+app.get('/proxy', async (req, res) => {
+  const targetUrl = req.query.url;
+  const userAgent = req.query.ua || DEFAULT_UA;
+  if (!targetUrl) return res.status(400).send('Falta ?url=');
 
-      // Si es m3u8, reescribir URLs de los .ts para que también pasen por el proxy
-      if (targetUrl.includes('.m3u8') || body.includes('#EXTM3U')) {
-        const base = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
-        const proxyBase = url.origin + url.pathname;
-        
-        body = body.split('\n').map(line => {
-          line = line.trim();
-          if (!line || line.startsWith('#')) return line;
-          // es una url de segmento
-          let full = line;
-          if (line.startsWith('/')) {
-             // /nk7t4f7d8w7r68h0kt/417_3044.ts -> http://nffthex0kzt.xyz/...
-             full = 'http://nffthex0kzt.xyz' + line;
-          } else if (!line.startsWith('http')) {
-             full = base + line;
-          }
-          return `${proxyBase}?url=${encodeURIComponent(full)}&ua=${encodeURIComponent(userAgent)}`;
-        }).join('\n');
-        
-        contentType = 'application/vnd.apple.mpegurl';
+  try {
+    const upstream = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': userAgent,
+        'Referer': 'http://nffthex0kzt.xyz/',
+        'Origin': 'http://nffthex0kzt.xyz',
       }
+    });
 
-      return new Response(body, {
-        status: upstream.status,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Content-Type': contentType,
-          'Cache-Control': 'no-cache',
+    const contentType = upstream.headers.get('content-type') || '';
+    const isM3U8 = targetUrl.includes('.m3u8') || contentType.includes('mpegurl');
+
+    if (isM3U8) {
+      let text = await upstream.text();
+      const urlObj = new URL(targetUrl);
+      const baseOrigin = `${urlObj.protocol}//${urlObj.host}`;
+      const basePath = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+
+      const rewritten = text.split('\n').map(line => {
+        let l = line.trim();
+        if (!l || l.startsWith('#')) return l;
+        let fullUrl = l;
+        if (l.startsWith('/')) {
+          fullUrl = baseOrigin + l; // resuelve /nk7t4f7d8w7r68h0kt/417_3044.ts
+        } else if (!l.startsWith('http')) {
+          fullUrl = basePath + l;
         }
-      });
+        return `${req.protocol}://${req.get('host')}/proxy?url=${encodeURIComponent(fullUrl)}&ua=${encodeURIComponent(userAgent)}`;
+      }).join('\n');
 
-    } catch (e) {
-      return new Response('Error proxy: ' + e.message, { status: 500 });
+      res.set({
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'application/vnd.apple.mpegurl',
+        'Cache-Control': 'no-cache',
+      });
+      return res.send(rewritten);
+    } else {
+      res.set({
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': contentType || 'video/mp2t',
+      });
+      upstream.body.pipe(res);
     }
+  } catch (e) {
+    res.status(500).send('Error: ' + e.message);
   }
-}
+});
+
+app.listen(PORT, () => console.log(`Proxy en puerto ${PORT}`));
